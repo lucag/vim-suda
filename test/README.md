@@ -2,6 +2,17 @@
 
 `test/run.sh` runs everything: each `test/*_test.lua` in headless Neovim and again under the TUI harness, then each `test/vim/*_test.vim` in Vim. Pass file paths to run only those. CI sets `SUDA_TEST_REQUIRE_VIM=1` and `SUDA_TEST_REQUIRE_TUI=1`; locally the Vim files are skipped when Vim is missing, and the TUI runs are skipped when `script(1)` is missing.
 
+## Other Neovim versions
+
+CI runs the suite on each Neovim in the matrix in `.github/workflows/test.yml`: the oldest supported, the oldest that delegates to the Terminal Client, and `stable`. Run one locally with `test/nvim-version.sh <tag>`, which downloads the release once into `.cache/nvim/` and prints its `nvim`:
+
+```sh
+test/nvim-version.sh v0.12.0
+NVIM=<printed path> test/run.sh
+```
+
+Run it on its own first: its download needs the network.
+
 ## The TUI harness
 
 `test/tui.sh` is a Host Shell: `script(1)` starts it on a pseudo-terminal as a process session leader, and it runs interactive `nvim`. The test file runs in the server (`nvim --embed`), so the Terminal Client delegation path (ADR-0002) is live. `h.tui` is true there, `$SUDA_TEST_HOST_SID` holds the Host Shell's session id, and results go to `$SUDA_TEST_OUT` because the server's stdout is its RPC channel. `test/terminal_client_test.lua` registers some tests only under one harness, and the delegation tests only on Neovim 0.12+ (older Terminal Clients never answer the server; there it checks the fallback instead).

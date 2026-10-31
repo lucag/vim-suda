@@ -17,3 +17,7 @@ The sudo step sequence (credential check, then prompt, then exactly one run of t
 ## Backend parity
 
 Behaviour matches across backends, Vim and Neovim. Where it can't (Windows and csh shells keep stderr mixed into stdout), a comment at the branch states the difference and its reason, and the help mentions it if users can notice.
+
+## Blocking on another process
+
+A call that waits on a process vim-suda does not control (`vim.rpcrequest()`, `:wait()` with no timeout, anything that may read the terminal) carries a comment naming the peers and Neovim versions known to answer, and is gated to them. Each `has('nvim-X')` gate has a CI matrix entry on an X.y release, so the gated code runs at its floor. Version claims in ADRs and help name the version they were verified on.

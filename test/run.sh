@@ -54,7 +54,7 @@ for file in $runs; do
       fi
       # script(1) gives test/tui.sh a pseudo-terminal and a process session.
       # Its stdin is the FIFO: on EOF, script would type ^D into the terminal.
-      TERM=xterm-256color timeout 120 script -qec \
+      TERM=xterm-256color timeout 60 script -qec \
         "$(printf '%s %s %s %s' "$root/test/tui.sh" "$nvim" "${file%@tui}" "$out")" \
         /dev/null 0<>"$tmp/stdin" >/dev/null 2>&1
       code=$?
