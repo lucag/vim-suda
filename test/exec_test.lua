@@ -18,20 +18,15 @@ local function load_isolated()
   return chunk()
 end
 
-local function no_password()
-  error('unexpected password prompt')
-end
-
 h.test('has no require in its source', function()
   local source = h.read_bytes(path)
   h.eq(nil, source:match('require%s*[%(\'"]'), 'a require call in exec.lua')
 end)
 
-h.test('runs the step sequence when loaded without require', function()
+h.test('runs a step when loaded without require', function()
   local exec = load_isolated()
   h.fake_sudo({ state = 'cached' })
-  local spec = { executable = { 'sudo' }, sudo = true, cmd = { 'echo', 'hi' } }
-  local r = exec.sequence(spec, exec.step, no_password)
+  local r = exec.step({ 'sudo', '-n', '--', 'echo', 'hi' }, '')
   h.eq({ 0, 'hi\n' }, { r.code, r.stdout })
 end)
 
@@ -39,14 +34,12 @@ h.test('with a stdout file, never returns stdout, even on failure', function()
   local exec = load_isolated()
   h.fake_sudo({ state = 'cached', fail = { cmd = 'cat', stdout = 'secret contents\n', stderr = 'cat: boom\n' } })
   local out = h.tempdir() .. '/out'
-  local spec = { executable = { 'sudo' }, sudo = true, cmd = { 'cat', '/etc/hostname' }, stdout_path = out }
 
-  local failed = exec.sequence(spec, exec.step, no_password)
+  local failed = exec.step({ 'sudo', '-n', '--', 'cat', '/etc/hostname' }, '', out)
   h.eq({ 1, '', 'cat: boom\n' }, { failed.code, failed.stdout, failed.stderr })
 
   h.fake_sudo({ state = 'cached' })
-  spec.cmd = { 'printf', 'file contents' }
-  local ok = exec.sequence(spec, exec.step, no_password)
+  local ok = exec.step({ 'sudo', '-n', '--', 'printf', 'file contents' }, '', out)
   h.eq({ 0, '' }, { ok.code, ok.stdout })
   h.eq('file contents', h.read_bytes(out))
 end)

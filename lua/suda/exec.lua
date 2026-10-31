@@ -1,5 +1,6 @@
--- vim-suda's step runner: runs the sudo step sequence for one privileged
--- operation without a shell and without detaching from the editor.
+-- vim-suda's step runner: runs one sudo step (one argv) without a shell and
+-- without detaching from the editor. The step sequence lives in
+-- s:run_privileged() in autoload/suda.vim.
 --
 -- This file must stay self-contained (no `require`): it is meant to be sent
 -- as source text to the Terminal Client, which does not load vim-suda's
@@ -49,49 +50,6 @@ function M.write_file(path, data)
   if not ok or not closed then
     return tostring(write_err or close_err)
   end
-end
-
-local function concat(...)
-  local out = {}
-  for _, list in ipairs({ ... }) do
-    for _, v in ipairs(list) do
-      out[#out + 1] = v
-    end
-  end
-  return out
-end
-
--- Run the step sequence for one privileged command.
---
--- spec:
---   executable      argv prefix of the privilege tool, e.g. { 'sudo' }
---   sudo            true if the tool takes sudo flags
---   noninteractive  only run the command non-interactively
---   cmd             argv of the privileged command
---   input           stdin for the command (string)
---   stdout_path     (optional) file to receive the command's stdout bytes
--- step(argv, input, stdout_path)  runs one step: { code, stdout, stderr }
--- ask_password()     returns the password, or '' / nil to cancel
---
--- Returns the command's { code, stdout, stderr }, or { cancelled = true }.
--- The command runs at most once.
-function M.sequence(spec, step, ask_password)
-  local exe, cmd, input = spec.executable, spec.cmd, spec.input or ''
-  local stdout_path = spec.stdout_path
-  if not spec.sudo then
-    return step(concat(exe, cmd), input, stdout_path)
-  end
-  if spec.noninteractive then
-    return step(concat(exe, { '-n', '--' }, cmd), input, stdout_path)
-  end
-  if step(concat(exe, { '-n', '-v' }), '').code == 0 then
-    return step(concat(exe, { '-n', '--' }, cmd), input, stdout_path)
-  end
-  local password = ask_password()
-  if password == nil or password == '' then
-    return { cancelled = true }
-  end
-  return step(concat(exe, { '-p', '', '-S', '--' }, cmd), password .. '\n' .. input, stdout_path)
 end
 
 return M

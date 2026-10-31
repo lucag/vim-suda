@@ -18,17 +18,11 @@ function! s:is_sudo() abort
   return fnamemodify(program, ':t') =~# '^sudo\%(-rs\|\.ws\)\?$'
 endfunction
 
-" Returns {args} prefixed with g:suda#executable as a string that is safe to
-" pass to `system` on both vim and neovim
-function! s:command_line(args) abort
-  return join(map(s:argv_prefix() + a:args, { k, v -> shellescape(v) }), ' ')
-endfunction
-
-" {opts} is a list of sudo options, {cmd} the argv list of the command.
-" Sudo-compatible executables get {opts} and '--' before {cmd}; any other
-" executable gets only {cmd}.
-function! s:get_command(opts, cmd) abort
-  return s:command_line(s:is_sudo() ? a:opts + ['--'] + a:cmd : a:cmd)
+" The argv that runs {cmd} (an argv list) with privileges: g:suda#executable,
+" then, for a sudo-compatible executable only, the sudo options {opts} and
+" '--'. Only the credential check (`-n -v`, no command) is built elsewhere.
+function! s:privileged_argv(opts, cmd) abort
+  return s:argv_prefix() + (s:is_sudo() ? a:opts + ['--'] : []) + a:cmd
 endfunction
 
 " Runs one shell command line of the system backend.
@@ -58,8 +52,7 @@ function! s:run(cmd, input, ...) abort
 endfunction
 
 " Ask for the sudo password. Returns an empty string if cancelled.
-" Internal: also called by lua/suda/server.lua.
-function! suda#_read_password() abort
+function! s:read_password() abort
   try
     call inputsave()
     redraw | let password = inputsecret(g:suda#prompt)
@@ -83,6 +76,33 @@ function! s:backend() abort
   return has('nvim-0.10') && !has('win32') ? 'nvim' : 'system'
 endfunction
 
+" The two step adapters: each runs one step, {argv} with {input} on stdin,
+" and returns {'code', 'stdout', 'stderr'} with output as lists of lines.
+" With a non-empty {stdout_path}, stdout goes byte for byte into that file.
+
+" A step of the system backend, through systemlist().
+function! s:system_step(argv, input, stdout_path) abort
+  let cmd = join(map(copy(a:argv), { k, v -> shellescape(v) }), ' ')
+  return s:run(cmd, a:input, a:stdout_path)
+endfunction
+
+" A step of the nvim backend, on Terminal Client channel {chan} or, if {chan}
+" is 0, in the server.
+function! s:nvim_step(chan, argv, input, stdout_path) abort
+  return luaeval('require("suda.server").step(unpack(_A))',
+        \ [a:chan, a:argv, a:input, a:stdout_path])
+endfunction
+
+" The step adapter for one privileged operation. On the nvim backend, where
+" its steps run is chosen (and logged) once, here.
+function! s:step_adapter() abort
+  if s:backend() !=# 'nvim'
+    return function('s:system_step')
+  endif
+  let why_not = s:is_sudo() ? '' : 'g:suda#executable is not sudo-compatible'
+  return function('s:nvim_step', [luaeval('require("suda.server").choose(_A)', why_not)])
+endfunction
+
 " Runs {cmd} (an argv list) with privileges, with {input} on stdin.
 " Returns {'code', 'stdout', 'stderr'} with output as lists of lines.
 " With {stdout_path} (a:1), stdout goes byte for byte into that file instead.
@@ -94,37 +114,20 @@ endfunction
 " command runs without validation or a password prompt.
 function! s:run_privileged(cmd, input, ...) abort
   let stdout_path = a:0 ? a:1 : ''
-  if s:backend() ==# 'nvim'
-    let spec = {
-          \ 'executable': s:argv_prefix(),
-          \ 'sudo': s:is_sudo() ? v:true : v:false,
-          \ 'noninteractive': g:suda#noninteractive ? v:true : v:false,
-          \ 'cmd': a:cmd,
-          \ 'input': a:input,
-          \}
-    if !empty(stdout_path)
-      let spec.stdout_path = stdout_path
-    endif
-    let result = luaeval('require("suda.server").run(_A)', spec)
-    if get(result, 'cancelled')
-      throw 'cancelled'
-    endif
-    return result
-  endif
-
+  let Step = s:step_adapter()
   if has('win32') || !s:is_sudo()
-    return s:run(s:get_command([], a:cmd), a:input, stdout_path)
+    return Step(s:privileged_argv([], a:cmd), a:input, stdout_path)
   elseif g:suda#noninteractive
-    return s:run(s:get_command(['-n'], a:cmd), a:input, stdout_path)
+    return Step(s:privileged_argv(['-n'], a:cmd), a:input, stdout_path)
   endif
-  if s:run(s:command_line(['-n', '-v']), '').code == 0
-    return s:run(s:get_command(['-n'], a:cmd), a:input, stdout_path)
+  if Step(s:argv_prefix() + ['-n', '-v'], '', '').code == 0
+    return Step(s:privileged_argv(['-n'], a:cmd), a:input, stdout_path)
   endif
-  let password = suda#_read_password()
+  let password = s:read_password()
   if empty(password)
     throw 'cancelled'
   endif
-  return s:run(s:get_command(['-p', '', '-S'], a:cmd), password . "\n" . a:input, stdout_path)
+  return Step(s:privileged_argv(['-p', '', '-S'], a:cmd), password . "\n" . a:input, stdout_path)
 endfunction
 
 " The error message of a failed {result}.

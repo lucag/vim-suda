@@ -1,6 +1,7 @@
--- Runs vim-suda's step runner (suda.exec) for the Vimscript layer: in the
--- Terminal Client when the delegation guard allows it (ADR-0002), otherwise
--- in the editor's server process. Converts the result for Vimscript.
+-- Runs sudo steps for the Vimscript layer, which owns the step sequence and
+-- builds every argv: in the Terminal Client when the delegation guard allows
+-- it (ADR-0002), otherwise in the editor's server process, through the step
+-- runner (suda.exec). Converts results for Vimscript.
 local exec = require('suda.exec')
 
 local M = {}
@@ -117,38 +118,37 @@ local function client_step(chan)
   end
 end
 
--- The step function for an operation on {spec}, with the chosen path logged.
--- A tool that is not sudo-compatible gets no -n or -S and could prompt on
--- the Terminal Client's terminal while the editor waits, so it never leaves
--- the server.
-local function choose_step(spec)
+-- Where the sudo steps of one operation run: the channel of a Terminal
+-- Client, or 0 for the server. The chosen path and the reason are logged.
+-- {why_not} is empty if the steps may leave the server, or the reason they
+-- must not (a tool that is not sudo-compatible gets no -n or -S and could
+-- prompt on the Terminal Client's terminal while the editor waits).
+function M.choose(why_not)
   local chan, why
-  if spec.sudo then
+  if why_not == '' then
     chan, why = terminal_client()
   else
-    why = 'g:suda#executable is not sudo-compatible'
+    why = why_not
   end
   if chan then
     log('running sudo from the Terminal Client (' .. why .. ')')
-    return client_step(chan)
+    return chan
   end
   log('running sudo from the server: ' .. why)
-  return exec.step
+  return 0
 end
 
--- Run one privileged command (see suda.exec.sequence for {spec}).
--- Returns { code, stdout, stderr } with output as lists of lines, or
--- { cancelled = true }.
-function M.run(spec)
-  local step = choose_step(spec)
-  local function logged_step(argv, input, stdout_path)
-    log(table.concat(argv, ' '))
-    return step(argv, input, stdout_path)
+-- Run one step, {argv} with {input} on stdin, where M.choose() said: on
+-- Terminal Client channel {chan}, or in the server if {chan} is 0. With a
+-- non-empty {stdout_path}, stdout goes byte for byte into that file.
+-- Returns { code, stdout, stderr } with output as lists of lines.
+function M.step(chan, argv, input, stdout_path)
+  log(table.concat(argv, ' '))
+  if stdout_path == '' then
+    stdout_path = nil
   end
-  local r = exec.sequence(spec, logged_step, vim.fn['suda#_read_password'])
-  if r.cancelled then
-    return { cancelled = true }
-  end
+  local step = chan ~= 0 and client_step(chan) or exec.step
+  local r = step(argv, input, stdout_path)
   return { code = r.code, stdout = lines(r.stdout), stderr = lines(r.stderr) }
 end
 
