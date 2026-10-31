@@ -37,6 +37,7 @@ Run the plugin through these helpers only. A hand-typed `nvim`/`vim` command loa
 
 - Under the TUI harness, never write to stdout from a test: it corrupts the server's RPC channel. Messages that scroll past the command line stop at a hit-enter prompt, so capture them with `vim.fn.execute()`.
 
+- Headless runs echo the password prompt (`Password: ******`) into the output, glued to the next result line. That is expected, not a regression.
 - `nvim -l` sets `'verbose'` to 1; `helpers.lua` resets it.
 - vim-suda calls `inputsave()`, which discards typeahead, so `feedkeys()` never reaches the prompt. Lua uses `nvim_input()`; Vim feeds keys from a timer.
 - An unanswered prompt reads EOF: headless Neovim quits with exit 0 mid-test (`run.sh` fails a file that prints no summary), and Vim quits too, which is why `run.sh` gives Vim a FIFO as stdin.
