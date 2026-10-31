@@ -18,11 +18,16 @@ function! s:is_sudo() abort
   return fnamemodify(program, ':t') =~# '^sudo\%(-rs\|\.ws\)\?$'
 endfunction
 
-" The argv that runs {cmd} (an argv list) with privileges: g:suda#executable,
-" then, for a sudo-compatible executable only, the sudo options {opts} and
-" '--'. Only the credential check (`-n -v`, no command) is built elsewhere.
-function! s:privileged_argv(opts, cmd) abort
-  return s:argv_prefix() + (s:is_sudo() ? a:opts + ['--'] : []) + a:cmd
+" The argv that runs {cmd} (a:1, an argv list) with privileges:
+" g:suda#executable, then, for a sudo-compatible executable only, the sudo
+" options {opts} and '--'. Without {cmd}, the argv runs sudo with {opts}
+" alone (the credential check). Every argv vim-suda runs is built here.
+function! s:privileged_argv(opts, ...) abort
+  let cmd = a:0 ? a:1 : []
+  if !s:is_sudo()
+    return s:argv_prefix() + cmd
+  endif
+  return s:argv_prefix() + a:opts + (a:0 ? ['--'] + cmd : [])
 endfunction
 
 " Runs one shell command line of the system backend.
@@ -94,13 +99,16 @@ function! s:nvim_step(chan, argv, input, stdout_path) abort
 endfunction
 
 " The step adapter for one privileged operation. On the nvim backend, where
-" its steps run is chosen (and logged) once, here.
+" its steps run is chosen (and logged) once, here. A tool that is not
+" sudo-compatible gets no -n or -S and could prompt on the Terminal Client's
+" terminal while the editor waits, so its steps never leave the server.
 function! s:step_adapter() abort
   if s:backend() !=# 'nvim'
     return function('s:system_step')
   endif
   let why_not = s:is_sudo() ? '' : 'g:suda#executable is not sudo-compatible'
-  return function('s:nvim_step', [luaeval('require("suda.server").choose(_A)', why_not)])
+  let chan = luaeval('require("suda.server").step_channel(_A)', why_not)
+  return function('s:nvim_step', [chan])
 endfunction
 
 " Runs {cmd} (an argv list) with privileges, with {input} on stdin.
@@ -120,7 +128,7 @@ function! s:run_privileged(cmd, input, ...) abort
   elseif g:suda#noninteractive
     return Step(s:privileged_argv(['-n'], a:cmd), a:input, stdout_path)
   endif
-  if Step(s:argv_prefix() + ['-n', '-v'], '', '').code == 0
+  if Step(s:privileged_argv(['-n', '-v']), '', '').code == 0
     return Step(s:privileged_argv(['-n'], a:cmd), a:input, stdout_path)
   endif
   let password = s:read_password()

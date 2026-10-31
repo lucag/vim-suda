@@ -8,11 +8,11 @@ User-facing text (help, README, error messages) and test names use the terms in 
 
 ## One step sequence, two step adapters
 
-The sudo step sequence (credential check, then prompt, then exactly one run of the command) and every argv it runs live only in `s:run_privileged()` and `s:privileged_argv()` in `autoload/suda.vim`. Each backend is a step adapter that runs one finished argv: `s:system_step()` (systemlist, needed for Vim) and `s:nvim_step()` (`lua/suda/server.lua`, in the server or the Terminal Client). The Lua side never decides which step comes next. Every plugin behaviour test in `test/*_test.lua` registers through `h.test_each_backend`, so one test covers both adapters. A test pinned to one backend says why in a comment.
+The sudo step sequence (credential check, then prompt, then exactly one run of the command) and every argv it runs live only in `s:run_privileged()` and `s:privileged_argv()` in `autoload/suda.vim`. Each backend is a step adapter that runs one finished argv: `s:system_step()` (systemlist, needed for Vim) and `s:nvim_step()` (through `lua/suda/server.lua`, in the server or the Terminal Client). The Lua side never decides which step comes next. Every plugin behaviour test in `test/*_test.lua` registers through `h.test_each_backend`, so one test covers both adapters. A test pinned to one backend says why in a comment.
 
 ## Step runner boundaries (ADR-0002)
 
-`lua/suda/exec.lua` runs on whichever process starts sudo, so its results carry only `{code, stderr}`, plus stdout when no stdout file is given. Logging and Vimscript conversion stay in `lua/suda/server.lua`; prompting stays in `autoload/suda.vim`.
+`lua/suda/exec.lua` runs on whichever process starts sudo, so its results carry only `{code, stderr}`, plus stdout when no stdout file is given. Logging stays in `lua/suda/server.lua` and `autoload/suda.vim`, Vimscript conversion in `lua/suda/server.lua`, and prompting in `autoload/suda.vim`.
 
 ## Backend parity
 

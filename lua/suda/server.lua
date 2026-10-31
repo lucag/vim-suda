@@ -50,9 +50,9 @@ local loaded = (loadstring or load)(source, '=suda/exec.lua') ~= nil
 return { loaded = loaded, pid = vim.uv.os_getpid() }
 ]]
 local STEP = [[
-local source, s = ...
+local source, payload = ...
 local exec = assert((loadstring or load)(source, '=suda/exec.lua'))()
-return exec.step(s.argv, s.input, s.stdout_path, s.opts)
+return exec.step(payload.argv, payload.input, payload.stdout_path, payload.opts)
 ]]
 
 -- The delegation guard. Returns the channel of a Terminal Client that may run
@@ -103,13 +103,13 @@ end
 -- tempfile and returns { code, stdout, stderr } with stdout empty.
 local function client_step(chan)
   return function(argv, input, stdout_path)
-    local spec = {
+    local payload = {
       argv = argv,
       input = input,
       stdout_path = stdout_path,
       opts = { env = vim.fn.environ(), clear_env = true, cwd = vim.fn.getcwd() },
     }
-    local ok, res = pcall(vim.rpcrequest, chan, 'nvim_exec_lua', STEP, { runner_source(), spec })
+    local ok, res = pcall(vim.rpcrequest, chan, 'nvim_exec_lua', STEP, { runner_source(), payload })
     if not ok then
       -- Never retried in the server: the step may already have run.
       return { code = 1, stdout = '', stderr = 'the Terminal Client could not run sudo: ' .. tostring(res) }
@@ -118,12 +118,11 @@ local function client_step(chan)
   end
 end
 
--- Where the sudo steps of one operation run: the channel of a Terminal
--- Client, or 0 for the server. The chosen path and the reason are logged.
+-- The channel the sudo steps of one operation run on: a Terminal Client's,
+-- or 0 for the server. The chosen path and the reason are logged.
 -- {why_not} is empty if the steps may leave the server, or the reason they
--- must not (a tool that is not sudo-compatible gets no -n or -S and could
--- prompt on the Terminal Client's terminal while the editor waits).
-function M.choose(why_not)
+-- must not, which autoload/suda.vim decides.
+function M.step_channel(why_not)
   local chan, why
   if why_not == '' then
     chan, why = terminal_client()
@@ -138,7 +137,7 @@ function M.choose(why_not)
   return 0
 end
 
--- Run one step, {argv} with {input} on stdin, where M.choose() said: on
+-- Run one step, {argv} with {input} on stdin, where M.step_channel() said: on
 -- Terminal Client channel {chan}, or in the server if {chan} is 0. With a
 -- non-empty {stdout_path}, stdout goes byte for byte into that file.
 -- Returns { code, stdout, stderr } with output as lists of lines.
