@@ -57,6 +57,12 @@ Please make sure this is in line with your security requirements.
 On Windows, and when |g:suda#executable| is not "sudo", the command runs once
 with no credential check and no password prompt.
 
+On Neovim 0.10 or newer (not Windows), sudo is started directly by the editor
+process, without a shell and without detaching, so all reads and writes in one
+Editor Session share one Credential Scope: a password typed once is reused
+while sudo's timestamp is valid. A credential from the shell that launched
+the editor is not shared yet. Elsewhere sudo runs through |systemlist()|.
+
 =============================================================================
 USAGE						*suda-usage*
 
@@ -151,9 +157,20 @@ FUNCTION					*suda-interface-function*
 
 						*suda#system()*
 suda#system({cmd} [, {input}])
-	Like |system()| but execute {cmd} with "sudo", asking for a password
-	if needed (see |suda-introduction|). Throws "cancelled" when the
-	password prompt is answered with an empty string.
+	Run {cmd}, a |List| of arguments, with "sudo", passing the optional
+	{input} string on stdin. A password is asked for only if needed (see
+	|suda-introduction|).
+	On success, returns the command's stdout. On failure, returns its
+	stderr instead (never stdout). Lines are joined with "\n" and NUL
+	bytes are removed. |v:shell_error| is set to the command's exit code
+	in both cases.
+	Throws "cancelled" when the password prompt is answered with an empty
+	string.
+
+						*suda#systemlist()*
+suda#systemlist({cmd} [, {input}])
+	Like |suda#system()| but returns a |List| of lines, with NUL bytes
+	replaced by "\n", like |systemlist()|.
 
 						*suda#read()*
 suda#read({expr} [, {options}])

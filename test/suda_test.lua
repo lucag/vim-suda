@@ -3,6 +3,8 @@
 local h = dofile(vim.fs.dirname(arg[0]) .. '/helpers.lua')
 h.load_plugin()
 
+local test = h.test_each_backend
+
 -- Run an Ex command and return the messages it produced.
 local function ex(cmd, path)
   return vim.fn.execute(cmd .. ' ' .. vim.fn.fnameescape(path))
@@ -29,7 +31,7 @@ local function lines()
   return vim.api.nvim_buf_get_lines(0, 0, -1, false)
 end
 
-h.test(':SudaRead loads a Protected File into a suda:// buffer', function()
+test(':SudaRead loads a Protected File into a suda:// buffer', function()
   local path = h.protected_file(h.tempdir(), 'hosts', 'line one\nline two\n')
   local fake = h.fake_sudo({ state = 'cached', protected = { path } })
 
@@ -51,7 +53,7 @@ local function is_dd_write(argv, opts, path)
     and argv[#opts + 5] == 'bs=1048576'
 end
 
-h.test(':SudaWrite stores the buffer into a Protected File', function()
+test(':SudaWrite stores the buffer into a Protected File', function()
   local path = h.protected_file(h.tempdir(), 'hosts', 'old\n')
   local fake = h.fake_sudo({ state = 'cached', protected = { path } })
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'new one', 'new two' })
@@ -66,7 +68,7 @@ h.test(':SudaWrite stores the buffer into a Protected File', function()
   h.ok(is_dd_write(calls[2], { '-n' }, path), vim.inspect(calls[2]))
 end)
 
-h.test(':SudaRead then :SudaWrite round-trips an edited Protected File', function()
+test(':SudaRead then :SudaWrite round-trips an edited Protected File', function()
   local path = h.protected_file(h.tempdir(), 'fstab', 'a\nb\n')
   local fake = h.fake_sudo({ state = 'cached', protected = { path } })
 
@@ -83,7 +85,7 @@ h.test(':SudaRead then :SudaWrite round-trips an edited Protected File', functio
   h.ok(is_dd_write(calls[4], { '-n' }, path), vim.inspect(calls[4]))
 end)
 
-h.test('cached credential: no prompt, and the command runs once', function()
+test('cached credential: no prompt, and the command runs once', function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({ state = 'cached', protected = { path } })
 
@@ -95,7 +97,7 @@ h.test('cached credential: no prompt, and the command runs once', function()
   h.eq({ { '-n', '-v' }, { '-n', '--', 'cat', path } }, argvs(fake))
 end)
 
-h.test('no cached credential: one prompt, then the command runs once with the password on stdin', function()
+test('no cached credential: one prompt, then the command runs once with the password on stdin', function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({ state = 'uncached', password = 'secret', protected = { path } })
 
@@ -107,7 +109,7 @@ h.test('no cached credential: one prompt, then the command runs once with the pa
   h.eq('secret\n', fake.calls()[2].stdin)
 end)
 
-h.test(':SudaWrite sends the password on stdin when no credential is cached', function()
+test(':SudaWrite sends the password on stdin when no credential is cached', function()
   local path = h.protected_file(h.tempdir(), 'hosts', 'old\n')
   local fake = h.fake_sudo({ state = 'uncached', password = 'secret', protected = { path } })
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'new' })
@@ -122,7 +124,7 @@ h.test(':SudaWrite sends the password on stdin when no credential is cached', fu
   h.eq('secret\n', calls[2].stdin)
 end)
 
-h.test('command failure with a cached credential: runs once and reports its stderr', function()
+test('command failure with a cached credential: runs once and reports its stderr', function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({
     state = 'cached',
@@ -136,7 +138,21 @@ h.test('command failure with a cached credential: runs once and reports its stde
   h.eq({ { '-n', '-v' }, { '-n', '--', 'cat', path } }, argvs(fake))
 end)
 
-h.test('command failure after the prompt: runs once and reports its stderr', function()
+test('a failing read reports stderr only, never stdout', function()
+  local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
+  h.fake_sudo({
+    state = 'cached',
+    protected = { path },
+    fail = { cmd = 'cat', stdout = 'partial output\n', stderr = 'cat: read error\n' },
+  })
+
+  local out = sudaread(path)
+
+  reports(out, 'cat: read error')
+  h.ok(not out:find('partial output', 1, true), 'stdout is not reported: ' .. out)
+end)
+
+test('command failure after the prompt: runs once and reports its stderr', function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({
     state = 'uncached',
@@ -151,7 +167,7 @@ h.test('command failure after the prompt: runs once and reports its stderr', fun
   h.eq({ { '-n', '-v' }, { '-p', '', '-S', '--', 'cat', path } }, argvs(fake))
 end)
 
-h.test('an empty prompt answer cancels without running the command', function()
+test('an empty prompt answer cancels without running the command', function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({ state = 'uncached', protected = { path } })
 
@@ -163,7 +179,7 @@ h.test('an empty prompt answer cancels without running the command', function()
   h.eq({ { '-n', '-v' } }, argvs(fake), 'only the credential check ran')
 end)
 
-h.test('<Esc> at the prompt cancels too', function()
+test('<Esc> at the prompt cancels too', function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({ state = 'uncached', protected = { path } })
 
@@ -174,7 +190,7 @@ h.test('<Esc> at the prompt cancels too', function()
   h.eq({ { '-n', '-v' } }, argvs(fake))
 end)
 
-h.test("a wrong password reports sudo's stderr and does not prompt again", function()
+test("a wrong password reports sudo's stderr and does not prompt again", function()
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
   local fake = h.fake_sudo({ state = 'wrong-password', protected = { path } })
 
@@ -186,7 +202,7 @@ h.test("a wrong password reports sudo's stderr and does not prompt again", funct
   h.eq({ { '-n', '-v' }, { '-p', '', '-S', '--', 'cat', path } }, argvs(fake))
 end)
 
-h.test('g:suda#noninteractive runs only the non-interactive command', function()
+test('g:suda#noninteractive runs only the non-interactive command', function()
   vim.g['suda#noninteractive'] = 1
   do
     local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
@@ -202,6 +218,41 @@ h.test('g:suda#noninteractive runs only the non-interactive command', function()
     reports(out, 'sudo: a password is required')
     h.eq({ { '-n', '--', 'cat', path } }, argvs(fake), 'no validation, no prompt')
   end
+end)
+
+local function nvim_session_id()
+  return h.self_stat().sid
+end
+
+h.test('by default on Neovim 0.10+, nvim starts every sudo step itself, in its own process session', function()
+  local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
+  local fake = h.fake_sudo({ state = 'uncached', protected = { path } })
+
+  h.answer_prompt('secret')
+  sudaread(path)
+  ex('SudaWrite', path)
+
+  local calls = fake.calls()
+  h.eq(4, #calls, 'validate + read, validate + write')
+  for i, call in ipairs(calls) do
+    h.eq(vim.fn.getpid(), call.ppid, 'no shell between nvim and sudo, call ' .. i)
+    h.eq(nvim_session_id(), call.sid, 'same session as nvim, call ' .. i)
+  end
+end)
+
+h.test('the system backend starts each sudo step in a new session', function()
+  vim.g['suda#_backend'] = 'system'
+  local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
+  local fake = h.fake_sudo({ state = 'cached', protected = { path } })
+
+  sudaread(path)
+
+  local calls = fake.calls()
+  h.eq(2, #calls)
+  for _, call in ipairs(calls) do
+    h.ok(call.sid ~= nvim_session_id(), 'systemlist() detaches')
+  end
+  h.ok(calls[1].sid ~= calls[2].sid, 'every step gets its own session')
 end)
 
 h.run()

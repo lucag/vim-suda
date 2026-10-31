@@ -42,6 +42,7 @@ end
 local function reset_editor()
   vim.cmd('silent! %bwipeout!')
   vim.g['suda#noninteractive'] = 0
+  vim.g['suda#_backend'] = nil
   vim.v.errmsg = ''
 end
 
@@ -121,12 +122,13 @@ end
 -- opts:
 --   state     'cached' | 'uncached' | 'wrong-password' (default 'uncached')
 --   password  the password the fake accepts on -S (default 'secret')
---   fail      { cmd = 'cat', stderr = 'message' }: running `cmd` fails with
---             `stderr` on stderr and exit code 1
+--   fail      { cmd = 'cat', stdout = 'out', stderr = 'message' }: running
+--             `cmd` writes `stdout` (optional), then fails with `stderr` on
+--             stderr and exit code 1
 --   protected list of Protected File paths made accessible while a command runs
 --
 -- Returns an object with:
---   calls()   list of { argv, stdin, sid, tty } per invocation, in order
+--   calls()   list of { argv, stdin, ppid, sid, tty } per invocation, in order
 --   state()   the fake's current credential state
 --   run(args, stdin) run the fake directly; returns vim.system() result
 function M.fake_sudo(opts)
@@ -138,6 +140,9 @@ function M.fake_sudo(opts)
   if opts.fail then
     M.write_bytes(dir .. '/fail_cmd', opts.fail.cmd .. '\n')
     M.write_bytes(dir .. '/fail_stderr', opts.fail.stderr)
+    if opts.fail.stdout then
+      M.write_bytes(dir .. '/fail_stdout', opts.fail.stdout)
+    end
   end
   M.write_bytes(dir .. '/protected', table.concat(opts.protected or {}, '\n') .. '\n')
 
@@ -164,6 +169,7 @@ function M.fake_sudo(opts)
       table.insert(calls, {
         argv = argv,
         stdin = M.read_bytes(c .. '/stdin'),
+        ppid = tonumber(vim.trim(M.read_bytes(c .. '/ppid'))),
         sid = tonumber(vim.trim(M.read_bytes(c .. '/sid'))),
         tty = tonumber(vim.trim(M.read_bytes(c .. '/tty'))),
       })
@@ -185,6 +191,23 @@ end
 -- stdin and quits.
 function M.answer_prompt(text)
   vim.api.nvim_input(text:gsub('<', '<lt>') .. '<CR>')
+end
+
+-- Register {name} once per vim-suda backend, with g:suda#_backend forced.
+function M.test_each_backend(name, fn)
+  for _, backend in ipairs({ 'nvim', 'system' }) do
+    M.test(string.format('[%s] %s', backend, name), function()
+      vim.g['suda#_backend'] = backend
+      fn()
+    end)
+  end
+end
+
+-- Fields of /proc/self/stat after "(comm) ": state, ppid, pgrp, session,
+-- tty_nr, ... as numbers where numeric.
+function M.self_stat()
+  local fields = vim.split(M.read_bytes('/proc/self/stat'):gsub('^.*%) ', ''), ' ')
+  return { ppid = tonumber(fields[2]), sid = tonumber(fields[4]), tty = tonumber(fields[5]) }
 end
 
 -- Load vim-suda from this checkout.

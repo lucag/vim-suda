@@ -58,10 +58,31 @@ h.test('failing command: reports its stderr and exits 1', function()
   h.eq(0, fake.run({ '-n', '--', 'true' }).code, 'other commands still run')
 end)
 
+h.test('logs its parent process id', function()
+  local fake = h.fake_sudo({ state = 'cached' })
+  vim.system({ 'sudo', '-n', '--', 'true' }):wait()
+  vim.fn.system({ 'sh', '-c', 'sudo -n -- true; exit $?' })
+  local direct, via_shell = unpack(fake.calls())
+  h.eq(vim.fn.getpid(), direct.ppid, 'started directly by nvim')
+  h.ok(via_shell.ppid ~= vim.fn.getpid(), 'started by an intermediate shell')
+end)
+
+h.test('failing command can also write to stdout', function()
+  local fake = h.fake_sudo({ state = 'cached', fail = { cmd = 'cat', stdout = 'partial\n', stderr = 'cat: boom\n' } })
+  local r = fake.run({ '-n', '--', 'cat', '/dev/null' })
+  h.eq({ 1, 'partial\n', 'cat: boom\n' }, { r.code, r.stdout, r.stderr })
+end)
+
+h.test('a command killed by a signal kills the fake with the same signal, like sudo', function()
+  local fake = h.fake_sudo({ state = 'cached' })
+  local r = fake.run({ '-n', '--', 'sh', '-c', 'kill -9 $$' })
+  h.eq(9, r.signal)
+end)
+
 h.test('logs the session id and terminal number of the fake process', function()
   local fake = h.fake_sudo({ state = 'cached' })
-  local nvim = vim.split(h.read_bytes('/proc/self/stat'):gsub('^.*%) ', ''), ' ')
-  local nvim_sid, nvim_tty = tonumber(nvim[4]), tonumber(nvim[5])
+  local nvim = h.self_stat()
+  local nvim_sid, nvim_tty = nvim.sid, nvim.tty
 
   vim.system({ 'sudo', '-n', '--', 'true' }):wait()
   vim.system({ 'sudo', '-n', '--', 'true' }, { detach = true }):wait()

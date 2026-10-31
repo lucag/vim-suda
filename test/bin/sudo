@@ -5,6 +5,7 @@
 #   state        cached | uncached | wrong-password
 #   password     the password accepted on -S
 #   fail_cmd     (optional) a command name that fails when run
+#   fail_stdout  (optional) what that failing command writes to stdout first
 #   fail_stderr  (optional) the stderr message of that failing command
 #   protected    Protected File paths, one per line; set to mode 600 while the
 #                command runs to emulate privilege, then back to mode 000
@@ -12,6 +13,7 @@
 # Every invocation is logged to $FAKE_SUDO_DIR/calls/<n>/:
 #   argv   arguments, each terminated by NUL
 #   stdin  every byte received on stdin
+#   ppid   parent process id (the process that started sudo)
 #   sid    session id of this process
 #   tty    controlling terminal number (tty_nr), 0 if none
 #
@@ -35,8 +37,10 @@ done
 
 # Fields after "(comm) ": state ppid pgrp session tty_nr ...
 stat=$(sed 's/^.*) //' /proc/$$/stat)
+ppid=$(printf '%s\n' "$stat" | awk '{ print $2 }')
 sid=$(printf '%s\n' "$stat" | awk '{ print $4 }')
 tty=$(printf '%s\n' "$stat" | awk '{ print $5 }')
+echo "$ppid" >"$log/ppid"
 echo "$sid" >"$log/sid"
 echo "$tty" >"$log/tty"
 
@@ -97,6 +101,7 @@ fi
 
 # --- run the command with emulated privilege ------------------------------
 if [ -f "$dir/fail_cmd" ] && [ "$(basename "$1")" = "$(cat "$dir/fail_cmd")" ]; then
+  [ -f "$dir/fail_stdout" ] && cat "$dir/fail_stdout"
   cat "$dir/fail_stderr" >&2
   exit 1
 fi
@@ -111,4 +116,13 @@ trap 'set_protected_mode 000' EXIT
 trap 'exit 130' INT TERM HUP
 set_protected_mode 600
 tail -c +$((input_offset + 1)) "$log/stdin" | "$@"
+code=$?
+set_protected_mode 000
+trap - EXIT
+# Like sudo: if the command was killed by a signal, die by the same signal.
+if [ $code -gt 128 ]; then
+  trap - INT TERM HUP
+  kill -s "$(kill -l $((code - 128)))" $$
+fi
+exit $code
 

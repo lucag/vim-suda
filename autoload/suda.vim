@@ -24,59 +24,127 @@ function! s:is_sudo() abort
   return g:suda#executable ==# 'sudo'
 endfunction
 
+" Runs one shell command line of the system backend.
+" Returns {'code', 'stdout', 'stderr'} with output as lists of lines, NULs
+" replaced with NLs. stderr is captured separately with a POSIX-style `2>`
+" redirect; on Windows and with csh-like shells it stays mixed into stdout,
+" which is then also returned as stderr.
 function! s:run(cmd, input) abort
   if &verbose
     echomsg '[suda]' a:cmd
   endif
-  return systemlist(a:cmd, a:input)
+  if has('win32') || &shell =~# 'csh$'
+    let output = systemlist(a:cmd, a:input)
+    return {'code': v:shell_error, 'stdout': output, 'stderr': output}
+  endif
+  let errfile = tempname()
+  try
+    let stdout = systemlist(a:cmd . ' 2>' . shellescape(errfile), a:input)
+    let code = v:shell_error
+    let stderr = filereadable(errfile) ? readfile(errfile) : []
+  finally
+    call delete(errfile)
+  endtry
+  return {'code': code, 'stdout': stdout, 'stderr': stderr}
 endfunction
 
-" Ask for the sudo password. Throws 'cancelled' on an empty answer.
-function! s:ask_password() abort
+" Ask for the sudo password. Returns an empty string if cancelled.
+" Internal: also called by lua/suda/server.lua.
+function! suda#_read_password() abort
   try
     call inputsave()
     redraw | let password = inputsecret(g:suda#prompt)
   finally
     call inputrestore()
   endtry
-  if empty(password)
-    throw 'cancelled'
-  endif
   return password
 endfunction
 
-" {cmd} is a argv list for the process
-" {input} (a:1) is a string to pass as stdin to the command
-" Returns a list of the command's output, split by NLs, with NULs replaced with NLs.
+" 'nvim': sudo runs from the editor's server process via vim.system(),
+" without a shell or detaching, so every step in the Editor Session shares
+" one Credential Scope (not yet the Host Shell's: see ADR-0002).
+" 'system': sudo runs via systemlist() (Vim, Neovim < 0.10, Windows).
+" g:suda#_backend forces one of them (used by the tests).
+function! s:backend() abort
+  let forced = get(g:, 'suda#_backend', '')
+  if !empty(forced)
+    return forced
+  endif
+  return has('nvim-0.10') && !has('win32') ? 'nvim' : 'system'
+endfunction
+
+" Runs {cmd} (an argv list) with privileges, with {input} on stdin.
+" Returns {'code', 'stdout', 'stderr'} with output as lists of lines.
+" Throws 'cancelled' if the password prompt is answered with nothing.
 "
 " The command runs exactly once. With sudo, a cached credential is checked
 " first (`sudo -n -v`); the password is asked for only when there is none.
 " With g:suda#noninteractive, on Windows, or with a non-sudo executable, the
 " command runs without validation or a password prompt.
-function! suda#systemlist(cmd, ...) abort
-  let input = a:0 ? a:1 : ''
+function! s:run_privileged(cmd, input) abort
+  if s:backend() ==# 'nvim'
+    let spec = {
+          \ 'executable': [g:suda#executable],
+          \ 'sudo': s:is_sudo() ? v:true : v:false,
+          \ 'noninteractive': g:suda#noninteractive ? v:true : v:false,
+          \ 'cmd': a:cmd,
+          \ 'input': a:input,
+          \}
+    let result = luaeval('require("suda.server").run(_A)', spec)
+    if get(result, 'cancelled')
+      throw 'cancelled'
+    endif
+    return result
+  endif
+
   if has('win32') || !s:is_sudo()
-    return s:run(s:get_command([], a:cmd), input)
+    return s:run(s:get_command([], a:cmd), a:input)
   elseif g:suda#noninteractive
-    return s:run(s:get_command(['-n'], a:cmd), input)
+    return s:run(s:get_command(['-n'], a:cmd), a:input)
   endif
-  call s:run(s:command_line(['-n', '-v']), '')
-  if v:shell_error == 0
-    return s:run(s:get_command(['-n'], a:cmd), input)
+  if s:run(s:command_line(['-n', '-v']), '').code == 0
+    return s:run(s:get_command(['-n'], a:cmd), a:input)
   endif
-  let password = s:ask_password()
-  return s:run(s:get_command(['-p', '', '-S'], a:cmd), password . "\n" . input)
+  let password = suda#_read_password()
+  if empty(password)
+    throw 'cancelled'
+  endif
+  return s:run(s:get_command(['-p', '', '-S'], a:cmd), password . "\n" . a:input)
 endfunction
+
+" The error message of a failed {result}.
+function! s:error(result) abort
+  return empty(a:result.stderr)
+        \ ? printf('command failed with exit code %d', a:result.code)
+        \ : join(a:result.stderr, "\n")
+endfunction
+
+" Sets v:shell_error to {code} by running a trivial non-privileged process.
+" Only the nvim backend needs this: the system backend's last systemlist()
+" call already set it.
+function! s:set_shell_error(code) abort
+  if s:backend() ==# 'nvim' && v:shell_error != a:code
+    call system(['sh', '-c', 'exit ' . a:code])
+  endif
+endfunction
+
 " {cmd} is a argv list for the process
 " {input} (a:1) is a string to pass as stdin to the command
-" Returns the command's output as a string with NULs replaced with SOH (\u0001)
-function! suda#system(cmd, ...) abort
-  let output = call("suda#systemlist", [a:cmd] + a:000)
-  " Emulate system()'s handling of output - replace NULs (represented by NL), join by NLs
-  return join( map(l:output, { k, v -> substitute(v:val, '\n', '', 'g') }), '\n')
+" Returns the command's stdout as a list of lines (NULs replaced with NLs) on
+" success, or its stderr lines on failure. Sets v:shell_error to the exit code.
+function! suda#systemlist(cmd, ...) abort
+  let result = s:run_privileged(a:cmd, a:0 ? a:1 : '')
+  call s:set_shell_error(result.code)
+  return result.code == 0 ? result.stdout : result.stderr
 endfunction
 
-
+" {cmd} is a argv list for the process
+" {input} (a:1) is a string to pass as stdin to the command
+" Like suda#systemlist() but joins the lines with NLs (NULs are removed).
+function! suda#system(cmd, ...) abort
+  let output = call('suda#systemlist', [a:cmd] + a:000)
+  return join(map(output, { k, v -> substitute(v, '\n', '', 'g') }), "\n")
+endfunction
 
 function! suda#read(expr, ...) abort range
   let path = s:strip_prefix(expand(a:expr))
@@ -101,12 +169,12 @@ function! suda#read(expr, ...) abort range
   try
     " NOTE: use systemlist to avoid changing newlines. Get the results of the
     " command (as a list) to avoid having to spawn a shell to do a redirection
-    let resultlist = suda#systemlist(['cat', fnamemodify(path, ':p')])
-    if v:shell_error
-      throw join(resultlist, "\n")
+    let result = s:run_privileged(['cat', path], '')
+    if result.code
+      throw s:error(result)
     else
       " write with 'b' to ensure contents are the same
-      call writefile(resultlist, tempfile, 'b')
+      call writefile(result.stdout, tempfile, 'b')
       let echo_message = execute(printf(
             \ '%sread %s %s',
             \ options.range,
@@ -154,16 +222,16 @@ function! suda#write(expr, ...) abort range
       " directory $VIMRUNTIME is not added here, so `tee` is not found.
       " Using a full path for tee command to avoid this problem.
       let tee_cmd = exepath('tee')
-      let result = suda#system(
+      let result = s:run_privileged(
             \ [tee_cmd, path],
             \ join(readfile(tempfile, 'b'), "\n") )
     else
       " `bs=1048576` is equivalent to `bs=1M` for GNU dd or `bs=1m` for BSD dd
       " Both `bs=1M` and `bs=1m` are non-POSIX
-      let result = suda#system(['dd', 'if='.tempfile, 'of='.path, 'bs=1048576'])
+      let result = s:run_privileged(['dd', 'if='.tempfile, 'of='.path, 'bs=1048576'], '')
     endif
-    if v:shell_error
-      throw result
+    if result.code
+      throw s:error(result)
     endif
     " Rewrite message with a correct file name
     let echo_message = substitute(
