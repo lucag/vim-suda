@@ -1,3 +1,7 @@
+## Testing
+
+`test/run.sh` runs the suite. Read `test/README.md` before writing tests or running the plugin by hand: outside the test helpers it reaches the real sudo.
+
 ## Agent skills
 
 ### Issue tracker

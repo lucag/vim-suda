@@ -17,4 +17,8 @@ jobs:
         with:
           neovim: true
           version: ${{ matrix.neovim }}
+      - name: Install Vim
+        run: command -v vim || (sudo apt-get update && sudo apt-get install -y vim)
       - run: test/run.sh
+        env:
+          SUDA_TEST_REQUIRE_VIM: 1
