@@ -43,6 +43,7 @@ local function reset_editor()
   vim.cmd('silent! %bwipeout!')
   vim.g['suda#noninteractive'] = 0
   vim.g['suda#_backend'] = nil
+  vim.o.fixendofline = true
   vim.v.errmsg = ''
 end
 

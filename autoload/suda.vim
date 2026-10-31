@@ -26,20 +26,22 @@ endfunction
 
 " Runs one shell command line of the system backend.
 " Returns {'code', 'stdout', 'stderr'} with output as lists of lines, NULs
-" replaced with NLs. stderr is captured separately with a POSIX-style `2>`
-" redirect; on Windows and with csh-like shells it stays mixed into stdout,
-" which is then also returned as stderr.
-function! s:run(cmd, input) abort
+" replaced with NLs. With {stdout_path} (a:1), stdout is redirected into that
+" file byte for byte instead. stderr is captured separately with a
+" POSIX-style `2>` redirect; on Windows and with csh-like shells it stays
+" mixed into stdout, which is then also returned as stderr.
+function! s:run(cmd, input, ...) abort
+  let cmd = a:0 && !empty(a:1) ? a:cmd . ' >' . shellescape(a:1) : a:cmd
   if &verbose
-    echomsg '[suda]' a:cmd
+    echomsg '[suda]' cmd
   endif
   if has('win32') || &shell =~# 'csh$'
-    let output = systemlist(a:cmd, a:input)
+    let output = systemlist(cmd, a:input)
     return {'code': v:shell_error, 'stdout': output, 'stderr': output}
   endif
   let errfile = tempname()
   try
-    let stdout = systemlist(a:cmd . ' 2>' . shellescape(errfile), a:input)
+    let stdout = systemlist(cmd . ' 2>' . shellescape(errfile), a:input)
     let code = v:shell_error
     let stderr = filereadable(errfile) ? readfile(errfile) : []
   finally
@@ -75,13 +77,15 @@ endfunction
 
 " Runs {cmd} (an argv list) with privileges, with {input} on stdin.
 " Returns {'code', 'stdout', 'stderr'} with output as lists of lines.
+" With {stdout_path} (a:1), stdout goes byte for byte into that file instead.
 " Throws 'cancelled' if the password prompt is answered with nothing.
 "
 " The command runs exactly once. With sudo, a cached credential is checked
 " first (`sudo -n -v`); the password is asked for only when there is none.
 " With g:suda#noninteractive, on Windows, or with a non-sudo executable, the
 " command runs without validation or a password prompt.
-function! s:run_privileged(cmd, input) abort
+function! s:run_privileged(cmd, input, ...) abort
+  let stdout_path = a:0 ? a:1 : ''
   if s:backend() ==# 'nvim'
     let spec = {
           \ 'executable': [g:suda#executable],
@@ -90,6 +94,9 @@ function! s:run_privileged(cmd, input) abort
           \ 'cmd': a:cmd,
           \ 'input': a:input,
           \}
+    if !empty(stdout_path)
+      let spec.stdout_path = stdout_path
+    endif
     let result = luaeval('require("suda.server").run(_A)', spec)
     if get(result, 'cancelled')
       throw 'cancelled'
@@ -98,18 +105,18 @@ function! s:run_privileged(cmd, input) abort
   endif
 
   if has('win32') || !s:is_sudo()
-    return s:run(s:get_command([], a:cmd), a:input)
+    return s:run(s:get_command([], a:cmd), a:input, stdout_path)
   elseif g:suda#noninteractive
-    return s:run(s:get_command(['-n'], a:cmd), a:input)
+    return s:run(s:get_command(['-n'], a:cmd), a:input, stdout_path)
   endif
   if s:run(s:command_line(['-n', '-v']), '').code == 0
-    return s:run(s:get_command(['-n'], a:cmd), a:input)
+    return s:run(s:get_command(['-n'], a:cmd), a:input, stdout_path)
   endif
   let password = suda#_read_password()
   if empty(password)
     throw 'cancelled'
   endif
-  return s:run(s:get_command(['-p', '', '-S'], a:cmd), password . "\n" . a:input)
+  return s:run(s:get_command(['-p', '', '-S'], a:cmd), password . "\n" . a:input, stdout_path)
 endfunction
 
 " The error message of a failed {result}.
@@ -167,14 +174,12 @@ function! suda#read(expr, ...) abort range
 
   let tempfile = tempname()
   try
-    " NOTE: use systemlist to avoid changing newlines. Get the results of the
-    " command (as a list) to avoid having to spawn a shell to do a redirection
-    let result = s:run_privileged(['cat', path], '')
+    " The privileged `cat` writes the file's bytes unchanged into {tempfile},
+    " which is then read like an ordinary file.
+    let result = s:run_privileged(['cat', path], '', tempfile)
     if result.code
       throw s:error(result)
     else
-      " write with 'b' to ensure contents are the same
-      call writefile(result.stdout, tempfile, 'b')
       let echo_message = execute(printf(
             \ '%sread %s %s',
             \ options.range,
@@ -257,7 +262,9 @@ function! suda#BufReadCmd() abort
   set undolevels=-1
   try
     setlocal noswapfile noundofile
+    " ++edit: detect 'fileformat', 'fileencoding' and 'eol' as :edit does
     let echo_message = suda#read('<afile>', {
+          \ 'cmdarg': v:cmdarg . ' ++edit',
           \ 'range': '1',
           \})
     silent lockmarks 0delete _

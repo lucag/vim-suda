@@ -20,11 +20,11 @@ local function lines(bytes)
   return out
 end
 
-local function logged_step(argv, input)
+local function logged_step(argv, input, stdout_path)
   if vim.o.verbose > 0 then
     vim.api.nvim_echo({ { '[suda] ' .. table.concat(argv, ' ') } }, true, {})
   end
-  return exec.step(argv, input)
+  return exec.step(argv, input, stdout_path)
 end
 
 -- Run one privileged command (see suda.exec.sequence for {spec}).
