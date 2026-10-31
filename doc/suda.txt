@@ -37,17 +37,25 @@ Make sure that the following shows 1.
 >
 	: echo executable('sudo')
 <
-|suda| will ask for a password each time sudo is used for reading or writing.
-However, you can set global timestamps in your sudoers configuration, if you
-have sudo version 1.8.21 or higher. This will enable |suda| to reuse an
-existing sudo authentication token. In this case, it will not ask for a
-password if not needed. To enable, configure sudo with this option:
+Before each read or write, |suda| asks sudo whether a credential is already
+cached ("sudo -n -v"). If one is, the command runs without a password prompt.
+Otherwise |suda| asks for the password with |g:suda#prompt| and passes it to
+sudo on stdin. The privileged command always runs exactly once: a wrong
+password or a failing command is reported with its own error message and is
+not retried. Answer the prompt with an empty string (<Esc> or <CR>) to cancel;
+|suda| then shows "[suda] cancelled" and runs nothing.
+
+Whether a credential cached outside the editor (for example by running sudo
+in your shell), or by an earlier read or write, is honoured depends on sudo's
+"timestamp_type" setting and on the process that runs sudo. See sudoers(5).
+With sudo 1.8.21 or newer, a global timestamp shares the credential everywhere:
 >
         Defaults timestamp_type = global
 <
-The other types 'ppid', 'kernel' or 'tty' will not allow |suda| to use sudo
-credential caching. Please make sure this is in line with your security
-requirements.
+Please make sure this is in line with your security requirements.
+
+On Windows, and when |g:suda#executable| is not "sudo", the command runs once
+with no credential check and no password prompt.
 
 =============================================================================
 USAGE						*suda-usage*
@@ -143,7 +151,9 @@ FUNCTION					*suda-interface-function*
 
 						*suda#system()*
 suda#system({cmd} [, {input}])
-	Like |system()| but execute {cmd} with "sudo".
+	Like |system()| but execute {cmd} with "sudo", asking for a password
+	if needed (see |suda-introduction|). Throws "cancelled" when the
+	password prompt is answered with an empty string.
 
 						*suda#read()*
 suda#read({expr} [, {options}])
@@ -172,12 +182,16 @@ suda#write({expr} [, {options}])
 VARIABLE					*suda-interface-variable*
 
 *g:suda#executable*
-	A executable of "sudo" command.
+	A executable of "sudo" command. Any other value (for example "doas")
+	runs as executable plus command, with no sudo flags, no credential
+	check and no password prompt, so it needs a passwordless setup.
 	Default: "sudo"
 
 *g:suda#noninteractive*
-	If set, suda will not prompt you for a password before saving a file.
-	It is suppossed to support a setup with passwordless sudo or doas.
+	If set, suda never prompts for a password and does not check for a
+	cached credential: it only runs the command non-interactively
+	("sudo -n"), which fails if sudo needs a password. It is supposed to
+	support a setup with passwordless sudo.
 	Use with care.
 	Default: 0
 

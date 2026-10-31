@@ -1,63 +1,71 @@
+" Returns {args} prefixed with g:suda#executable as a string that is safe to
+" pass to `system` on both vim and neovim
+function! s:command_line(args) abort
+  return join([g:suda#executable] + map(copy(a:args), { k, v -> shellescape(v) }), ' ')
+endfunction
+
 " {opts} is a list of command line options
 " {cmd} is the argv list for the process to run
 " {opts} should be *sudo-specific*, while {cmd} is passed to any suda#executable
 " Note: {cmd} can not have any sudo flags. Put these into {opts}, as '--' is passed before {cmd}
 " Similarly, {opts} should *not* contain '--'
-" Returns a string that is safe to pass to `system` on both vim and neovim
-function! s:get_command(opts, cmd)
-  if g:suda#executable ==# 'sudo' 
-    let ret = a:opts + ['--'] + a:cmd
-  else
-    " TODO:
-    " Should we pass '--' before cmd when using a custom suda#executable?
-    " Should suda#executable be split? Should we allow suda#executable to be a list instead?
-    " This behavior is entirely undocumented
-    let ret =  a:cmd
+function! s:get_command(opts, cmd) abort
+  if s:is_sudo()
+    return s:command_line(a:opts + ['--'] + a:cmd)
   endif
+  " TODO:
+  " Should we pass '--' before cmd when using a custom suda#executable?
+  " Should suda#executable be split? Should we allow suda#executable to be a list instead?
+  " This behavior is entirely undocumented
+  return s:command_line(a:cmd)
+endfunction
 
-  " TODO: Should we detect `has('neovim')` and return a list to avoid a shell?
-  return join([g:suda#executable] + map(ret, { k, v -> shellescape(v) }), ' ')
+function! s:is_sudo() abort
+  return g:suda#executable ==# 'sudo'
+endfunction
+
+function! s:run(cmd, input) abort
+  if &verbose
+    echomsg '[suda]' a:cmd
+  endif
+  return systemlist(a:cmd, a:input)
+endfunction
+
+" Ask for the sudo password. Throws 'cancelled' on an empty answer.
+function! s:ask_password() abort
+  try
+    call inputsave()
+    redraw | let password = inputsecret(g:suda#prompt)
+  finally
+    call inputrestore()
+  endtry
+  if empty(password)
+    throw 'cancelled'
+  endif
+  return password
 endfunction
 
 " {cmd} is a argv list for the process
 " {input} (a:1) is a string to pass as stdin to the command
 " Returns a list of the command's output, split by NLs, with NULs replaced with NLs.
+"
+" The command runs exactly once. With sudo, a cached credential is checked
+" first (`sudo -n -v`); the password is asked for only when there is none.
+" With g:suda#noninteractive, on Windows, or with a non-sudo executable, the
+" command runs without validation or a password prompt.
 function! suda#systemlist(cmd, ...) abort
-  let cmd = has('win32') || g:suda#noninteractive
-        \ ? s:get_command([], a:cmd)
-        \ : s:get_command(['-p', '', '-n'], a:cmd)
-  if &verbose
-    echomsg '[suda]' cmd
+  let input = a:0 ? a:1 : ''
+  if has('win32') || !s:is_sudo()
+    return s:run(s:get_command([], a:cmd), input)
+  elseif g:suda#noninteractive
+    return s:run(s:get_command(['-n'], a:cmd), input)
   endif
-  let result = a:0 ? systemlist(cmd, a:1) : systemlist(cmd)
+  call s:run(s:command_line(['-n', '-v']), '')
   if v:shell_error == 0
-    return result
+    return s:run(s:get_command(['-n'], a:cmd), input)
   endif
-  let ask_pass = 1
-  " Let's try running a command non-interactively. If it works, we have a sudo
-  " timestamp that has not timed out yet. In this case there is no need to ask
-  " for a password.
-  " This only works if the timestamp_type is set to 'global' in the sudo
-  " configuation file. It does not work with 'ppid', 'kernel' or 'tty'.
-  " Note: for non-sudo commands, don't do this, instead *always* ask for the password
-  if g:suda#executable ==# "sudo"
-    let cmd = s:get_command(["-n"], ["true"])
-    let result = systemlist(cmd)
-    if v:shell_error == 0
-      let cmd = s:get_command([], a:cmd)
-      let ask_pass = 0
-    endif
-  endif
-  if ask_pass == 1
-    try
-      call inputsave()
-      redraw  | let password = inputsecret(g:suda#prompt)
-    finally
-      call inputrestore()
-    endtry
-    let cmd = s:get_command(['-p', '', '-S'], a:cmd)
-  endif
-  return systemlist(cmd, password . "\n" . (a:0 ? a:1 : ''))
+  let password = s:ask_password()
+  return s:run(s:get_command(['-p', '', '-S'], a:cmd), password . "\n" . input)
 endfunction
 " {cmd} is a argv list for the process
 " {input} (a:1) is a string to pass as stdin to the command
@@ -95,7 +103,7 @@ function! suda#read(expr, ...) abort range
     " command (as a list) to avoid having to spawn a shell to do a redirection
     let resultlist = suda#systemlist(['cat', fnamemodify(path, ':p')])
     if v:shell_error
-      throw resultlist
+      throw join(resultlist, "\n")
     else
       " write with 'b' to ensure contents are the same
       call writefile(resultlist, tempfile, 'b')

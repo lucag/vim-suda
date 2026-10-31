@@ -41,6 +41,7 @@ end
 
 local function reset_editor()
   vim.cmd('silent! %bwipeout!')
+  vim.g['suda#noninteractive'] = 0
   vim.v.errmsg = ''
 end
 
