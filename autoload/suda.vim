@@ -1,27 +1,34 @@
+" g:suda#executable as an argv prefix: a String is one program (never split
+" on spaces), a List is a program plus extra arguments.
+" Throws if it is empty, so nothing ever runs without the privilege tool.
+function! s:argv_prefix() abort
+  let prefix = type(g:suda#executable) == type([])
+        \ ? copy(g:suda#executable)
+        \ : [g:suda#executable]
+  if empty(prefix) || empty(prefix[0])
+    throw 'g:suda#executable is empty'
+  endif
+  return prefix
+endfunction
+
+" True if g:suda#executable takes sudo flags: the basename of its program is
+" sudo, sudo-rs or sudo.ws.
+function! s:is_sudo() abort
+  let program = s:argv_prefix()[0]
+  return fnamemodify(program, ':t') =~# '^sudo\%(-rs\|\.ws\)\?$'
+endfunction
+
 " Returns {args} prefixed with g:suda#executable as a string that is safe to
 " pass to `system` on both vim and neovim
 function! s:command_line(args) abort
-  return join([g:suda#executable] + map(copy(a:args), { k, v -> shellescape(v) }), ' ')
+  return join(map(s:argv_prefix() + a:args, { k, v -> shellescape(v) }), ' ')
 endfunction
 
-" {opts} is a list of command line options
-" {cmd} is the argv list for the process to run
-" {opts} should be *sudo-specific*, while {cmd} is passed to any suda#executable
-" Note: {cmd} can not have any sudo flags. Put these into {opts}, as '--' is passed before {cmd}
-" Similarly, {opts} should *not* contain '--'
+" {opts} is a list of sudo options, {cmd} the argv list of the command.
+" Sudo-compatible executables get {opts} and '--' before {cmd}; any other
+" executable gets only {cmd}.
 function! s:get_command(opts, cmd) abort
-  if s:is_sudo()
-    return s:command_line(a:opts + ['--'] + a:cmd)
-  endif
-  " TODO:
-  " Should we pass '--' before cmd when using a custom suda#executable?
-  " Should suda#executable be split? Should we allow suda#executable to be a list instead?
-  " This behavior is entirely undocumented
-  return s:command_line(a:cmd)
-endfunction
-
-function! s:is_sudo() abort
-  return g:suda#executable ==# 'sudo'
+  return s:command_line(s:is_sudo() ? a:opts + ['--'] + a:cmd : a:cmd)
 endfunction
 
 " Runs one shell command line of the system backend.
@@ -88,7 +95,7 @@ function! s:run_privileged(cmd, input, ...) abort
   let stdout_path = a:0 ? a:1 : ''
   if s:backend() ==# 'nvim'
     let spec = {
-          \ 'executable': [g:suda#executable],
+          \ 'executable': s:argv_prefix(),
           \ 'sudo': s:is_sudo() ? v:true : v:false,
           \ 'noninteractive': g:suda#noninteractive ? v:true : v:false,
           \ 'cmd': a:cmd,

@@ -79,6 +79,21 @@ h.test('a command killed by a signal kills the fake with the same signal, like s
   h.eq(9, r.signal)
 end)
 
+h.test('accepts -E (preserve environment) as a no-op', function()
+  local fake = h.fake_sudo({ state = 'cached' })
+  local r = fake.run({ '-E', '-n', '--', 'echo', 'ok' })
+  h.eq({ 0, 'ok\n' }, { r.code, r.stdout })
+end)
+
+h.test('answers to the names sudo-rs, sudo.ws and doas as well', function()
+  local fake = h.fake_sudo({ state = 'cached' })
+  for _, name in ipairs({ 'sudo-rs', 'sudo.ws', 'doas' }) do
+    local r = vim.system({ h.bin .. '/' .. name, 'echo', name }, { text = true }):wait()
+    h.eq(name .. '\n', r.stdout)
+  end
+  h.eq(3, #fake.calls())
+end)
+
 h.test('logs the session id and terminal number of the fake process', function()
   local fake = h.fake_sudo({ state = 'cached' })
   local nvim = h.self_stat()

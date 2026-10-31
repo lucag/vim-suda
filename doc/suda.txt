@@ -54,8 +54,8 @@ With sudo 1.8.21 or newer, a global timestamp shares the credential everywhere:
 <
 Please make sure this is in line with your security requirements.
 
-On Windows, and when |g:suda#executable| is not "sudo", the command runs once
-with no credential check and no password prompt.
+On Windows, and when |g:suda#executable| is not sudo-compatible, the command
+runs once with no credential check and no password prompt.
 
 On Neovim 0.10 or newer (not Windows), sudo is started directly by the editor
 process, without a shell and without detaching, so all reads and writes in one
@@ -199,9 +199,22 @@ suda#write({expr} [, {options}])
 VARIABLE					*suda-interface-variable*
 
 *g:suda#executable*
-	A executable of "sudo" command. Any other value (for example "doas")
-	runs as executable plus command, with no sudo flags, no credential
-	check and no password prompt, so it needs a passwordless setup.
+	The privilege-escalation tool, as a |String| or a |List|.
+	A String is one program and is never split on spaces, so a path such
+	as "/opt/my tools/sudo" works. A List is an argv prefix: a program
+	followed by extra arguments, for example: >
+		let g:suda#executable = ['sudo', '-E']
+<	The tool is sudo-compatible when the basename of the program (the
+	String, or the first List item) is "sudo", "sudo-rs" or "sudo.ws",
+	also given as a full path. Only then does suda add sudo flags and
+	"--" before the command, check for a cached credential, and ask for a
+	password.
+	Any other tool (for example "doas") runs as the executable plus the
+	command, with no flags and no password prompt; suda never sends it a
+	password. Such a tool always runs non-interactively, as sudo does with
+	|g:suda#noninteractive| set, so it needs a passwordless setup.
+	Note: a String is no longer split on spaces. If you used a String with
+	arguments, such as "sudo -E", use a List instead: ['sudo', '-E'].
 	Default: "sudo"
 
 *g:suda#noninteractive*

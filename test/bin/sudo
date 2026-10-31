@@ -17,7 +17,8 @@
 #   sid    session id of this process
 #   tty    controlling terminal number (tty_nr), 0 if none
 #
-# Supported options (not combined): -n, -S, -v, -p <prompt>, --.
+# Supported options (not combined): -n, -S, -v, -E (ignored), -p <prompt>, --.
+# Also installed as sudo-rs, sudo.ws and doas (symlinks), with the same behaviour.
 # Linux only: the session id and terminal number come from /proc.
 set -u
 
@@ -59,6 +60,7 @@ while [ $# -gt 0 ]; do
     -n) noninteractive=1 ;;
     -S) stdin_pass=1 ;;
     -v) validate=1 ;;
+    -E) ;;
     -p)
       shift
       [ $# -gt 0 ] || { echo "sudo: option requires an argument -- 'p'" >&2; exit 1; }
