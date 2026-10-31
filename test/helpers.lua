@@ -68,6 +68,8 @@ function M.run()
       failed = failed + 1
       out:write('  FAIL ' .. t.name .. '\n    ' .. tostring(err):gsub('\n', '\n    ') .. '\n')
     end
+    -- Flushed per test, so a hang under the TUI harness shows where it stopped.
+    out:flush()
     M.cleanup()
   end
   out:write(string.format('  %d passed, %d failed\n', #tests - failed, failed))

@@ -12,6 +12,16 @@ local function tui_test(name, fn)
   end
 end
 
+-- Delegation needs Neovim 0.12: older Terminal Clients never answer the
+-- server's RPC requests.
+local can_delegate = vim.fn.has('nvim-0.12') == 1
+
+local function delegating_test(name, fn)
+  if can_delegate then
+    tui_test(name, fn)
+  end
+end
+
 local function headless_test(name, fn)
   if not h.tui then
     h.test('[headless] ' .. name, fn)
@@ -38,7 +48,7 @@ local function read_and_write()
   return calls, messages
 end
 
-tui_test('every sudo step runs in the Host Shell process session, on its terminal', function()
+delegating_test('every sudo step runs in the Host Shell process session, on its terminal', function()
   local host_sid = tonumber(vim.env.SUDA_TEST_HOST_SID)
   local calls = read_and_write()
   for i, call in ipairs(calls) do
@@ -97,7 +107,7 @@ local function uis_with(fields)
   end
 end
 
-tui_test('with the Terminal Client, verbose says so', function()
+delegating_test('with the Terminal Client, verbose says so', function()
   local messages
   with_verbose(function()
     messages = select(2, read_and_write())
@@ -105,7 +115,7 @@ tui_test('with the Terminal Client, verbose says so', function()
   h.ok(messages:find('[suda] running sudo from the Terminal Client (UI on channel ', 1, true), messages)
 end)
 
-tui_test('a UI without a terminal on stdin falls back to the server', function()
+delegating_test('a UI without a terminal on stdin falls back to the server', function()
   stubbed(vim.api, 'nvim_list_uis', uis_with({ stdin_tty = false }), function()
     local calls, messages
     with_verbose(function()
@@ -116,13 +126,13 @@ tui_test('a UI without a terminal on stdin falls back to the server', function()
   end)
 end)
 
-tui_test('a UI without a terminal on stdout falls back to the server', function()
+delegating_test('a UI without a terminal on stdout falls back to the server', function()
   stubbed(vim.api, 'nvim_list_uis', uis_with({ stdout_tty = false }), function()
     assert_server_started(read_and_write())
   end)
 end)
 
-tui_test("a UI that is not the server's parent process falls back to the server", function()
+delegating_test("a UI that is not the server's parent process falls back to the server", function()
   stubbed(vim.uv, 'os_getppid', function()
     return 1
   end, function()
@@ -135,7 +145,7 @@ tui_test("a UI that is not the server's parent process falls back to the server"
   end)
 end)
 
-tui_test('a UI whose RPC call fails falls back to the server', function()
+delegating_test('a UI whose RPC call fails falls back to the server', function()
   stubbed(vim, 'rpcrequest', function()
     error('channel closed')
   end, function()
@@ -147,6 +157,17 @@ tui_test('a UI whose RPC call fails falls back to the server', function()
     h.ok(messages:find('running sudo from the server: UI on channel %d+ failed the RPC call: .*channel closed'), messages)
   end)
 end)
+
+if not can_delegate then
+  tui_test('before Neovim 0.12, the server starts every sudo step and says why', function()
+    local calls, messages
+    with_verbose(function()
+      calls, messages = read_and_write()
+    end)
+    assert_server_started(calls)
+    h.ok(messages:find('running sudo from the server: Neovim 0.12 is needed to run sudo from the Terminal Client', 1, true), messages)
+  end)
+end
 
 tui_test('a tool that is not sudo-compatible runs from the server: it could prompt on the terminal', function()
   vim.g['suda#executable'] = 'doas'
@@ -161,7 +182,7 @@ tui_test('a tool that is not sudo-compatible runs from the server: it could prom
   h.ok(messages:find("running sudo from the server: g:suda#executable is not sudo-compatible", 1, true), messages)
 end)
 
-tui_test('file contents never cross the RPC channel, and the password crosses once and is never logged', function()
+delegating_test('file contents never cross the RPC channel, and the password crosses once and is never logged', function()
   local old, new = 'old-contents-7f3a', 'new-contents-9c1e'
   local path = h.protected_file(h.tempdir(), 'shadow', old .. '\n')
   h.fake_sudo({ state = 'uncached', password = 'pw-5d2b', protected = { path } })

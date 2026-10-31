@@ -4,7 +4,7 @@
 
 ## The TUI harness
 
-`test/tui.sh` is a Host Shell: `script(1)` starts it on a pseudo-terminal as a process session leader, and it runs interactive `nvim`. The test file runs in the server (`nvim --embed`), so the Terminal Client delegation path (ADR-0002) is live. `h.tui` is true there, `$SUDA_TEST_HOST_SID` holds the Host Shell's session id, and results go to `$SUDA_TEST_OUT` because the server's stdout is its RPC channel. `test/terminal_client_test.lua` registers some tests only under one harness.
+`test/tui.sh` is a Host Shell: `script(1)` starts it on a pseudo-terminal as a process session leader, and it runs interactive `nvim`. The test file runs in the server (`nvim --embed`), so the Terminal Client delegation path (ADR-0002) is live. `h.tui` is true there, `$SUDA_TEST_HOST_SID` holds the Host Shell's session id, and results go to `$SUDA_TEST_OUT` because the server's stdout is its RPC channel. `test/terminal_client_test.lua` registers some tests only under one harness, and the delegation tests only on Neovim 0.12+ (older Terminal Clients never answer the server; there it checks the fallback instead).
 
 ## Manual acceptance with the real sudo
 

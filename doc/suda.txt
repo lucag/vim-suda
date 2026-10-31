@@ -58,7 +58,7 @@ On Windows, and when |g:suda#executable| is not sudo-compatible, the command
 runs once with no credential check and no password prompt.
 
 						*suda-terminal-client*
-On Neovim 0.10 or newer (not Windows), |suda| asks the Terminal Client, the
+On Neovim 0.12 or newer (not Windows), |suda| asks the Terminal Client, the
 "nvim" process attached to your terminal, to start each sudo step. sudo then
 runs in the process session and on the terminal of the Host Shell, the shell
 that launched the editor, so it shares the Host Shell's Credential Scope: a
@@ -77,7 +77,8 @@ temporary file to copy.
 |suda| delegates only to a UI that has a terminal on both stdin and stdout,
 whose process started the editor's server (so it runs on the same host), and
 that answers the editor's request. A GUI, a remote UI ("nvim --remote-ui")
-and headless use fail this check. Then sudo is started by the editor's server
+and headless use fail this check, and so does Neovim 0.10 and 0.11, whose
+Terminal Client cannot answer. Then sudo is started by the editor's server
 process itself, without a shell and without detaching. The Credential Scope
 is then shared across reads and writes within the Editor Session, but not
 with the Host Shell. A remote UI never runs sudo on the host it runs on.

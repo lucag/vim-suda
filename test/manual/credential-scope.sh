@@ -6,7 +6,7 @@
 #
 # Usage: test/manual/credential-scope.sh [sudo-rs] [sudo.ws] [sudo]
 # Default: every one of sudo-rs and sudo.ws that is installed.
-# Needs Neovim 0.10+ on $PATH (or $NVIM) and setsid(1): Linux. Exits non-zero
+# Needs Neovim 0.12+ on $PATH (or $NVIM) and setsid(1): Linux. Exits non-zero
 # if any check fails. The editors quit by themselves once a check has run.
 #
 # For each flavour it checks:

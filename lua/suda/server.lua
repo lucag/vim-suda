@@ -41,10 +41,12 @@ local function runner_source()
 end
 
 -- Lua run by the Terminal Client through nvim_exec_lua. PROBE loads the step
--- runner; STEP loads it and runs one step.
+-- runner and returns the pid of the process that answers, the one that would
+-- start sudo; STEP loads the runner and runs one step.
 local PROBE = [[
 local source = ...
-return (loadstring or load)(source, '=suda/exec.lua') ~= nil
+local loaded = (loadstring or load)(source, '=suda/exec.lua') ~= nil
+return { loaded = loaded, pid = vim.uv.os_getpid() }
 ]]
 local STEP = [[
 local source, s = ...
@@ -55,30 +57,38 @@ return exec.step(s.argv, s.input, s.stdout_path, s.opts)
 -- The delegation guard. Returns the channel of a Terminal Client that may run
 -- sudo steps, or nil, plus the reason in both cases.
 --
--- A UI qualifies only if it reports a terminal on both stdin and stdout, its
--- process is the server's parent (the same host, and the process that
--- started this server), and it answers an RPC that loads the step runner.
+-- A UI qualifies only if it reports a terminal on both stdin and stdout,
+-- answers an RPC that loads the step runner, and the answering process is
+-- the server's parent (the same host, and the process that started this
+-- server). The pid comes from the probe, not from the UI's client info,
+-- which older Terminal Clients do not fill in.
 -- A remote UI must never run sudo on another host.
 local function terminal_client()
   local uis = vim.api.nvim_list_uis()
   if #uis == 0 then
     return nil, 'no UI is attached'
   end
+  -- Terminal Clients before Neovim 0.12 never answer the server's requests,
+  -- and vim.rpcrequest() has no timeout: the probe would hang the editor.
+  -- The server's version is the client's: it is the server's parent.
+  if vim.fn.has('nvim-0.12') == 0 then
+    return nil, 'Neovim 0.12 is needed to run sudo from the Terminal Client'
+  end
   local ppid = vim.uv.os_getppid()
   local reasons = {}
   for _, ui in ipairs(uis) do
     local why
-    local pid = vim.tbl_get(vim.api.nvim_get_chan_info(ui.chan), 'client', 'attributes', 'pid')
     if not (ui.stdin_tty and ui.stdout_tty) then
       why = 'has no terminal on stdin and stdout'
-    elseif tonumber(pid) ~= ppid then
-      why = string.format("is process %s, not the server's parent %d", tostring(pid or 'unknown'), ppid)
     else
       local ok, res = pcall(vim.rpcrequest, ui.chan, 'nvim_exec_lua', PROBE, { runner_source() })
-      if ok and res == true then
+      if not ok or type(res) ~= 'table' or res.loaded ~= true then
+        why = 'failed the RPC call: ' .. (ok and vim.inspect(res) or tostring(res))
+      elseif res.pid ~= ppid then
+        why = string.format("is process %s, not the server's parent %d", tostring(res.pid), ppid)
+      else
         return ui.chan, string.format('UI on channel %d, process %d', ui.chan, ppid)
       end
-      why = 'failed the RPC call: ' .. tostring(res)
     end
     table.insert(reasons, string.format('UI on channel %d %s', ui.chan, why))
   end
