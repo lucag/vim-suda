@@ -1,0 +1,114 @@
+#!/bin/sh
+# Fake `sudo` for the vim-suda test suite. Needs neither root nor a password.
+#
+# State lives in $FAKE_SUDO_DIR (see test/helpers.lua, fake_sudo()):
+#   state        cached | uncached | wrong-password
+#   password     the password accepted on -S
+#   fail_cmd     (optional) a command name that fails when run
+#   fail_stderr  (optional) the stderr message of that failing command
+#   protected    Protected File paths, one per line; set to mode 600 while the
+#                command runs to emulate privilege, then back to mode 000
+#
+# Every invocation is logged to $FAKE_SUDO_DIR/calls/<n>/:
+#   argv   arguments, each terminated by NUL
+#   stdin  every byte received on stdin
+#   sid    session id of this process
+#   tty    controlling terminal number (tty_nr), 0 if none
+#
+# Supported options (not combined): -n, -S, -v, -p <prompt>, --.
+# Linux only: the session id and terminal number come from /proc.
+set -u
+
+dir=${FAKE_SUDO_DIR:?FAKE_SUDO_DIR is not set}
+
+# --- log the call --------------------------------------------------------
+n=1
+while ! mkdir "$dir/calls/$n" 2>/dev/null; do
+  n=$((n + 1))
+done
+log="$dir/calls/$n"
+
+: >"$log/argv"
+for a in "$@"; do
+  printf '%s\0' "$a" >>"$log/argv"
+done
+
+# Fields after "(comm) ": state ppid pgrp session tty_nr ...
+stat=$(sed 's/^.*) //' /proc/$$/stat)
+sid=$(printf '%s\n' "$stat" | awk '{ print $4 }')
+tty=$(printf '%s\n' "$stat" | awk '{ print $5 }')
+echo "$sid" >"$log/sid"
+echo "$tty" >"$log/tty"
+
+if [ -t 0 ]; then
+  : >"$log/stdin"
+else
+  cat >"$log/stdin"
+fi
+
+# --- parse options -------------------------------------------------------
+noninteractive=0
+stdin_pass=0
+validate=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n) noninteractive=1 ;;
+    -S) stdin_pass=1 ;;
+    -v) validate=1 ;;
+    -p)
+      shift
+      [ $# -gt 0 ] || { echo "sudo: option requires an argument -- 'p'" >&2; exit 1; }
+      ;;
+    --) shift; break ;;
+    -*) echo "sudo: unsupported option '$1'" >&2; exit 1 ;;
+    *) break ;;
+  esac
+  shift
+done
+
+# --- authenticate --------------------------------------------------------
+state=$(cat "$dir/state")
+input_offset=0
+if [ "$state" != cached ]; then
+  if [ $stdin_pass = 1 ]; then
+    given=$(head -n 1 "$log/stdin")
+    input_offset=$(head -n 1 "$log/stdin" | wc -c)
+    if [ "$state" = wrong-password ] || [ "$given" != "$(cat "$dir/password")" ]; then
+      echo "sudo: 1 incorrect password attempt" >&2
+      exit 1
+    fi
+    echo cached >"$dir/state"
+  elif [ $noninteractive = 1 ]; then
+    echo "sudo: a password is required" >&2
+    exit 1
+  else
+    echo "sudo: a terminal is required to read the password" >&2
+    exit 1
+  fi
+fi
+
+if [ $validate = 1 ]; then
+  exit 0
+fi
+if [ $# -eq 0 ]; then
+  echo "usage: sudo [-n] [-S] [-v] [-p prompt] [--] command" >&2
+  exit 1
+fi
+
+# --- run the command with emulated privilege ------------------------------
+if [ -f "$dir/fail_cmd" ] && [ "$(basename "$1")" = "$(cat "$dir/fail_cmd")" ]; then
+  cat "$dir/fail_stderr" >&2
+  exit 1
+fi
+
+set_protected_mode() {
+  while IFS= read -r p; do
+    [ -n "$p" ] && [ -e "$p" ] && chmod "$1" "$p"
+  done <"$dir/protected"
+}
+
+trap 'set_protected_mode 000' EXIT
+trap 'exit 130' INT TERM HUP
+set_protected_mode 600
+tail -c +$((input_offset + 1)) "$log/stdin" | "$@"
+

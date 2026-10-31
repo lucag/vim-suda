@@ -73,3 +73,14 @@ Make sure that the following shows `1`.
 ### Use sudo without a password
 
 When `let g:suda#noninteractive = 1` is written in your vimrc, suda won't ask you for a password. Use at your own risk.
+
+## Development
+
+Run the test suite (Neovim 0.10+, Linux; no root or real password needed):
+
+```sh
+test/run.sh                        # every test/*_test.lua
+test/run.sh test/suda_test.lua     # one file
+```
+
+Tests are plain Lua scripts run with `nvim --headless -l`, with helpers in `test/helpers.lua`. A fake `sudo` (`test/bin/sudo`) stands in for the real one: it emulates privilege on Protected Files and logs every call.
