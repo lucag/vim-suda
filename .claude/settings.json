@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(test/nvim-version.sh:*)"
+      "Bash(test/nvim-version.sh:*)",
+      "Bash(scripts/map-append.sh:*)"
     ]
   }
 }
