@@ -22,3 +22,4 @@ jobs:
       - run: test/run.sh
         env:
           SUDA_TEST_REQUIRE_VIM: 1
+          SUDA_TEST_REQUIRE_TUI: 1

@@ -69,9 +69,10 @@ function! suda#_read_password() abort
   return password
 endfunction
 
-" 'nvim': sudo runs from the editor's server process via vim.system(),
-" without a shell or detaching, so every step in the Editor Session shares
-" one Credential Scope (not yet the Host Shell's: see ADR-0002).
+" 'nvim': lua/suda/server.lua runs each sudo step via vim.system(), without
+" a shell or detaching: in the Terminal Client when the delegation guard
+" passes, sharing the Host Shell's Credential Scope (ADR-0002), otherwise in
+" the editor's server, sharing it within the Editor Session.
 " 'system': sudo runs via systemlist() (Vim, Neovim < 0.10, Windows).
 " g:suda#_backend forces one of them (used by the tests).
 function! s:backend() abort

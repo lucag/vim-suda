@@ -57,11 +57,49 @@ Please make sure this is in line with your security requirements.
 On Windows, and when |g:suda#executable| is not sudo-compatible, the command
 runs once with no credential check and no password prompt.
 
-On Neovim 0.10 or newer (not Windows), sudo is started directly by the editor
-process, without a shell and without detaching, so all reads and writes in one
-Editor Session share one Credential Scope: a password typed once is reused
-while sudo's timestamp is valid. A credential from the shell that launched
-the editor is not shared yet. Elsewhere sudo runs through |systemlist()|.
+						*suda-terminal-client*
+On Neovim 0.10 or newer (not Windows), |suda| asks the Terminal Client, the
+"nvim" process attached to your terminal, to start each sudo step. sudo then
+runs in the process session and on the terminal of the Host Shell, the shell
+that launched the editor, so it shares the Host Shell's Credential Scope: a
+credential cached by "sudo -v" in the Host Shell is used by the editor, and a
+password typed in the editor is honoured back in the Host Shell. This works
+with the default "timestamp_type", for sudo-rs and for sudo.ws.
+
+The password prompt stays in the editor. Only the sudo arguments, the editor's
+environment and working directory, the password (once, if needed) and the
+exit code and error message pass between the editor and the Terminal Client.
+File contents do not: the Terminal Client writes what |:SudaRead| reads
+straight into the editor's temporary file, and |:SudaWrite| hands sudo a
+temporary file to copy.
+
+						*suda-fallback*
+|suda| delegates only to a UI that has a terminal on both stdin and stdout,
+whose process started the editor's server (so it runs on the same host), and
+that answers the editor's request. A GUI, a remote UI ("nvim --remote-ui")
+and headless use fail this check. Then sudo is started by the editor's server
+process itself, without a shell and without detaching. The Credential Scope
+is then shared across reads and writes within the Editor Session, but not
+with the Host Shell. A remote UI never runs sudo on the host it runs on.
+A |g:suda#executable| that is not sudo-compatible always runs from the
+server: without sudo's "-n" or "-S" it could prompt on your terminal while
+the editor waits. If the Terminal Client stops answering in the middle of an
+operation, |suda| reports an error instead of running the step again in the
+server, because the step may already have run.
+
+With 'verbose' set, |suda| logs which process runs sudo and why, followed by
+each sudo command line (never the password): >
+	:set verbose=1
+	:SudaRead /etc/shadow
+	[suda] running sudo from the Terminal Client (UI on channel 1, process 4242)
+	[suda] sudo -n -v
+	[suda] sudo -n -- cat /etc/shadow
+<	or, for example: >
+	[suda] running sudo from the server: no UI is attached
+<
+On Vim, on Neovim older than 0.10 and on Windows, sudo runs through
+|systemlist()|, which starts every step in a new process session, so whether
+a credential is reused depends on sudo's configuration (see above).
 
 =============================================================================
 USAGE						*suda-usage*

@@ -1,6 +1,14 @@
 # vim-suda tests
 
-`test/run.sh` runs everything: each `test/*_test.lua` in headless Neovim, then each `test/vim/*_test.vim` in Vim. Pass file paths to run only those. CI sets `SUDA_TEST_REQUIRE_VIM=1`; locally the Vim files are skipped when Vim is missing.
+`test/run.sh` runs everything: each `test/*_test.lua` in headless Neovim and again under the TUI harness, then each `test/vim/*_test.vim` in Vim. Pass file paths to run only those. CI sets `SUDA_TEST_REQUIRE_VIM=1` and `SUDA_TEST_REQUIRE_TUI=1`; locally the Vim files are skipped when Vim is missing, and the TUI runs are skipped when `script(1)` is missing.
+
+## The TUI harness
+
+`test/tui.sh` is a Host Shell: `script(1)` starts it on a pseudo-terminal as a process session leader, and it runs interactive `nvim`. The test file runs in the server (`nvim --embed`), so the Terminal Client delegation path (ADR-0002) is live. `h.tui` is true there, `$SUDA_TEST_HOST_SID` holds the Host Shell's session id, and results go to `$SUDA_TEST_OUT` because the server's stdout is its RPC channel. `test/terminal_client_test.lua` registers some tests only under one harness.
+
+## Manual acceptance with the real sudo
+
+`test/manual/credential-scope.sh [sudo-rs] [sudo.ws]` checks Credential Scope sharing with the real tools: Host Shell → editor, editor → Host Shell, and that the fallback (a remote UI) stays within the Editor Session. Run it yourself from an interactive terminal: it asks for your password in the shell and in the editor, and runs only `sudo -K`, `sudo -v` and `sudo true`. Re-run it after changing the delegation path or the step sequence. Agents never run it.
 
 ## The fake sudo
 
@@ -15,6 +23,8 @@ Run the plugin through these helpers only. A hand-typed `nvim`/`vim` command loa
 - Answer a password prompt with `h.answer_prompt(text)` (Lua) or `SudaTestAnswerPrompt(text)` (Vim), queued before the command.
 
 ## Gotchas
+
+- Under the TUI harness, never write to stdout from a test: it corrupts the server's RPC channel. Messages that scroll past the command line stop at a hit-enter prompt, so capture them with `vim.fn.execute()`.
 
 - `nvim -l` sets `'verbose'` to 1; `helpers.lua` resets it.
 - vim-suda calls `inputsave()`, which discards typeahead, so `feedkeys()` never reaches the prompt. Lua uses `nvim_input()`; Vim feeds keys from a timer.

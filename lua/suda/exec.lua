@@ -11,8 +11,15 @@ local M = {}
 -- A process killed by a signal gets code 128 + signal, like a shell reports.
 -- With {stdout_path}, stdout is written there byte for byte on success and
 -- never returned, so file contents never leave the process that read them.
-function M.step(argv, input, stdout_path)
-  local ok, obj = pcall(vim.system, argv, { stdin = input or '', text = false })
+-- {opts} (optional) adds `env`, `clear_env` and `cwd` for vim.system().
+function M.step(argv, input, stdout_path, opts)
+  local system_opts = { stdin = input or '', text = false }
+  for _, key in ipairs({ 'env', 'clear_env', 'cwd' }) do
+    if opts and opts[key] ~= nil then
+      system_opts[key] = opts[key]
+    end
+  end
+  local ok, obj = pcall(vim.system, argv, system_opts)
   if not ok then
     return { code = 127, stdout = '', stderr = tostring(obj) }
   end

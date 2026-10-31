@@ -220,26 +220,6 @@ test('g:suda#noninteractive runs only the non-interactive command', function()
   end
 end)
 
-local function nvim_session_id()
-  return h.self_stat().sid
-end
-
-h.test('by default on Neovim 0.10+, nvim starts every sudo step itself, in its own process session', function()
-  local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
-  local fake = h.fake_sudo({ state = 'uncached', protected = { path } })
-
-  h.answer_prompt('secret')
-  sudaread(path)
-  ex('SudaWrite', path)
-
-  local calls = fake.calls()
-  h.eq(4, #calls, 'validate + read, validate + write')
-  for i, call in ipairs(calls) do
-    h.eq(vim.fn.getpid(), call.ppid, 'no shell between nvim and sudo, call ' .. i)
-    h.eq(nvim_session_id(), call.sid, 'same session as nvim, call ' .. i)
-  end
-end)
-
 h.test('the system backend starts each sudo step in a new session', function()
   vim.g['suda#_backend'] = 'system'
   local path = h.protected_file(h.tempdir(), 'shadow', 'x\n')
@@ -250,7 +230,7 @@ h.test('the system backend starts each sudo step in a new session', function()
   local calls = fake.calls()
   h.eq(2, #calls)
   for _, call in ipairs(calls) do
-    h.ok(call.sid ~= nvim_session_id(), 'systemlist() detaches')
+    h.ok(call.sid ~= h.self_stat().sid, 'systemlist() detaches')
   end
   h.ok(calls[1].sid ~= calls[2].sid, 'every step gets its own session')
 end)

@@ -10,6 +10,14 @@ local M = {}
 -- `nvim -l` sets 'verbose' to 1; run the plugin with the default instead.
 vim.o.verbose = 0
 
+-- True under the TUI harness (test/tui.sh): the test runs in the server of
+-- an interactive Neovim whose Terminal Client sits on a pseudo-terminal.
+M.tui = vim.env.SUDA_TEST_TUI == '1'
+
+-- Under the TUI harness the server's stdout is its RPC channel to the
+-- Terminal Client, so results go to $SUDA_TEST_OUT instead.
+local out = M.tui and assert(io.open(assert(vim.env.SUDA_TEST_OUT), 'w')) or io.stdout
+
 M.root = vim.fs.normalize(vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':p:h:h'))
 M.bin = M.root .. '/test/bin'
 
@@ -43,6 +51,7 @@ local function reset_editor()
   vim.cmd('silent! %bwipeout!')
   vim.g['suda#noninteractive'] = 0
   vim.g['suda#_backend'] = nil
+  vim.g['suda#executable'] = 'sudo'
   vim.o.fixendofline = true
   vim.v.errmsg = ''
 end
@@ -54,15 +63,19 @@ function M.run()
     reset_editor()
     local ok, err = xpcall(t.fn, debug.traceback)
     if ok then
-      io.stdout:write('  ok   ' .. t.name .. '\n')
+      out:write('  ok   ' .. t.name .. '\n')
     else
       failed = failed + 1
-      io.stdout:write('  FAIL ' .. t.name .. '\n    ' .. tostring(err):gsub('\n', '\n    ') .. '\n')
+      out:write('  FAIL ' .. t.name .. '\n    ' .. tostring(err):gsub('\n', '\n    ') .. '\n')
     end
     M.cleanup()
   end
-  io.stdout:write(string.format('  %d passed, %d failed\n', #tests - failed, failed))
-  io.stdout:flush()
+  out:write(string.format('  %d passed, %d failed\n', #tests - failed, failed))
+  out:flush()
+  if M.tui then
+    -- The Terminal Client exits with the server's exit code.
+    vim.cmd(failed > 0 and 'cquit 1' or 'qall!')
+  end
   os.exit(failed > 0 and 1 or 0)
 end
 
